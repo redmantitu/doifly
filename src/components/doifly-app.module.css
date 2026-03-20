@@ -1712,14 +1712,61 @@
   padding: 20px;
   background: rgba(1, 7, 13, 0.56);
   backdrop-filter: blur(14px);
-  pointer-events: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  pointer-events: auto;
 }
 
 .modal {
   width: min(560px, 100%);
+  max-height: calc(100dvh - 40px);
   padding: 28px;
   border-radius: 28px;
   pointer-events: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.modalTopBar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -4px 0 8px;
+  padding-bottom: 14px;
+  background: linear-gradient(180deg, var(--surface) 82%, rgba(6, 18, 28, 0));
+}
+
+.modalTopBar .modalEyebrow {
+  margin-bottom: 0;
+}
+
+.modalCloseButton {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--surface-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--page-text);
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.modalCloseButton:hover {
+  border-color: rgba(84, 227, 218, 0.26);
+  background: rgba(84, 227, 218, 0.08);
 }
 
 .modal h2 {
@@ -1897,6 +1944,14 @@
 }
 
 @media (max-width: 760px) {
+  .modalBackdrop {
+    place-items: start center;
+    padding:
+      max(12px, env(safe-area-inset-top))
+      12px
+      max(12px, env(safe-area-inset-bottom));
+  }
+
   .pageShell {
     padding:
       max(14px, env(safe-area-inset-top))
@@ -1919,6 +1974,12 @@
   .card,
   .modal {
     border-radius: 22px;
+  }
+
+  .modal {
+    width: 100%;
+    max-height: calc(100dvh - 24px);
+    padding: 22px;
   }
 
   .brandBlock {

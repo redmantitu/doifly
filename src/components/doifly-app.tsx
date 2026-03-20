@@ -1975,6 +1975,14 @@ export function DoIflyApp() {
     !shouldShowLocationPrompt &&
     !isManualLocationOpen &&
     !isStorageReviewOpen;
+  const isAnyModalOpen =
+    hasHydrated &&
+    (consent.storageConsent === "unknown" ||
+      isStorageReviewOpen ||
+      shouldShowInstallGuide ||
+      shouldShowLocationPrompt ||
+      isManualLocationOpen ||
+      isSchedulerOpen);
   const persistedScheduledReports = useMemo(
     () => getPersistableScheduledReports(scheduledReports),
     [scheduledReports],
@@ -2113,6 +2121,41 @@ export function DoIflyApp() {
 
     manualLocationInputRef.current?.focus();
   }, [isManualLocationOpen]);
+
+  useEffect(() => {
+    if (!isAnyModalOpen) {
+      return;
+    }
+
+    const { body, documentElement } = document;
+    const scrollY = window.scrollY;
+    const previousBodyPosition = body.style.position;
+    const previousBodyTop = body.style.top;
+    const previousBodyLeft = body.style.left;
+    const previousBodyRight = body.style.right;
+    const previousBodyWidth = body.style.width;
+    const previousBodyOverflow = body.style.overflow;
+    const previousRootOverflow = documentElement.style.overflow;
+
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.left = "0";
+    body.style.right = "0";
+    body.style.width = "100%";
+    body.style.overflow = "hidden";
+    documentElement.style.overflow = "hidden";
+
+    return () => {
+      body.style.position = previousBodyPosition;
+      body.style.top = previousBodyTop;
+      body.style.left = previousBodyLeft;
+      body.style.right = previousBodyRight;
+      body.style.width = previousBodyWidth;
+      body.style.overflow = previousBodyOverflow;
+      documentElement.style.overflow = previousRootOverflow;
+      window.scrollTo(0, scrollY);
+    };
+  }, [isAnyModalOpen]);
 
   function selectCatalogAircraft(modelId: string) {
     setProfile((current) => mergeProfileFromCatalog(current, modelId));
@@ -2460,10 +2503,34 @@ export function DoIflyApp() {
         </div>
       ) : null}
       {isStorageReviewOpen ? (
-        <div className={styles.modalBackdrop}>
-          <section className={`${styles.modal} ${styles.storageReviewModal}`}>
-            <p className={styles.modalEyebrow}>Stored on this device</p>
-            <h2>Review what Do.I.Fly? keeps locally</h2>
+        <div
+          className={styles.modalBackdrop}
+          onClick={() => {
+            setIsStorageReviewOpen(false);
+          }}
+        >
+          <section
+            className={`${styles.modal} ${styles.storageReviewModal}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="storage-review-title"
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <div className={styles.modalTopBar}>
+              <p className={styles.modalEyebrow}>Stored on this device</p>
+              <button
+                className={styles.modalCloseButton}
+                type="button"
+                onClick={() => {
+                  setIsStorageReviewOpen(false);
+                }}
+              >
+                Close
+              </button>
+            </div>
+            <h2 id="storage-review-title">Review what Do.I.Fly? keeps locally</h2>
             <p>{storageReviewSnapshot.persistenceSummary}</p>
 
             <div className={styles.storageReviewGrid}>
