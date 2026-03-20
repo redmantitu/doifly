@@ -15,6 +15,7 @@
 
 # next.js
 /.next/
+/.next-stale-*/
 /out/
 
 # production
@@ -23,6 +24,7 @@
 # misc
 .DS_Store
 *.pem
+.playwright-cli/
 
 # debug
 npm-debug.log*
@@ -39,3 +41,5 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+certificates

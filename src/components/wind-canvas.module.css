@@ -1,0 +1,244 @@
+.stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 24% 22%, rgba(84, 227, 218, 0.07), transparent 34%),
+    linear-gradient(180deg, rgba(6, 12, 22, 0.66), rgba(6, 12, 22, 0.56));
+}
+
+.mapLayer,
+.mapMarker,
+.locationBadge,
+.mapLoadingBackdrop,
+.atmosphere,
+.canvas {
+  position: absolute;
+}
+
+.mapLayer {
+  inset: auto;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.5;
+  transform: scale(1.02);
+  transition:
+    opacity 220ms ease,
+    transform 320ms ease;
+}
+
+.mapLayerReady {
+  opacity: 0.7;
+  transform: scale(1);
+}
+
+.mapLoadingBackdrop {
+  inset: 0;
+  background:
+    radial-gradient(circle at 35% 30%, rgba(84, 227, 218, 0.1), transparent 34%),
+    radial-gradient(circle at 72% 62%, rgba(76, 168, 255, 0.08), transparent 38%),
+    linear-gradient(180deg, rgba(11, 22, 35, 0.62), rgba(10, 20, 32, 0.52));
+  opacity: 1;
+  transition: opacity 260ms ease;
+}
+
+.mapLoadingBackdropReady {
+  opacity: 0.1;
+}
+
+.mapTile {
+  position: absolute;
+  width: 256px;
+  height: 256px;
+  object-fit: cover;
+  filter: saturate(0.92) brightness(0.9) contrast(1.08);
+  opacity: 1;
+}
+
+.mapLoadingPanel {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 5;
+  display: grid;
+  gap: 4px;
+  width: min(250px, calc(100% - 32px));
+  padding: 12px 13px;
+  border: 1px solid rgba(154, 201, 255, 0.2);
+  border-radius: 16px;
+  background: rgba(7, 17, 29, 0.72);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 18px 40px rgba(3, 8, 15, 0.2);
+  pointer-events: none;
+}
+
+.mapLoadingLabel {
+  color: rgba(221, 248, 255, 0.62);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.mapLoadingPanel strong {
+  color: #eef8ff;
+  font-size: 0.84rem;
+  line-height: 1.25;
+}
+
+.mapLoadingCoords {
+  color: rgba(221, 248, 255, 0.7);
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.mapLoadingBars {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.mapLoadingBars span {
+  height: 3px;
+  flex: 1;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    rgba(132, 227, 218, 0.18),
+    rgba(132, 227, 218, 0.78),
+    rgba(76, 168, 255, 0.22)
+  );
+  animation: loadingPulse 1.35s ease-in-out infinite;
+}
+
+.mapLoadingBars span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.mapLoadingBars span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+.mapMarker {
+  left: 50%;
+  top: 50%;
+  z-index: 4;
+  width: 28px;
+  height: 28px;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid rgba(221, 248, 255, 0.42);
+  background: rgba(7, 17, 29, 0.34);
+  box-shadow: 0 0 0 12px rgba(84, 227, 218, 0.08);
+  pointer-events: none;
+}
+
+.mapMarkerDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #84e3da;
+  box-shadow: 0 0 18px rgba(132, 227, 218, 0.7);
+}
+
+.locationBadge {
+  left: 16px;
+  bottom: 16px;
+  z-index: 4;
+  display: grid;
+  gap: 3px;
+  max-width: min(70%, 280px);
+  padding: 10px 12px;
+  border: 1px solid rgba(154, 201, 255, 0.18);
+  border-radius: 16px;
+  background: rgba(7, 17, 29, 0.5);
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+}
+
+.locationBadgeLabel {
+  color: rgba(221, 248, 255, 0.62);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.locationBadge strong {
+  color: #eef8ff;
+  font-size: 0.82rem;
+  line-height: 1.25;
+}
+
+.locationBadgeCoords {
+  color: rgba(221, 248, 255, 0.72);
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.placeholderBackdrop,
+.atmosphere,
+.canvas {
+  inset: 0;
+}
+
+.placeholderBackdrop {
+  background:
+    radial-gradient(circle at 34% 22%, rgba(76, 168, 255, 0.08), transparent 30%),
+    radial-gradient(circle at 70% 68%, rgba(132, 227, 218, 0.04), transparent 28%),
+    linear-gradient(180deg, rgba(6, 12, 22, 0.98), rgba(9, 23, 37, 1));
+}
+
+.atmosphere {
+  z-index: 1;
+  background:
+    linear-gradient(180deg, rgba(6, 12, 22, 0.02), rgba(6, 12, 22, 0.12)),
+    radial-gradient(circle at 50% 50%, rgba(84, 227, 218, 0.05), transparent 58%),
+    linear-gradient(90deg, rgba(6, 12, 22, 0.02), rgba(76, 168, 255, 0.03));
+}
+
+.atmosphereIdle {
+  background:
+    linear-gradient(180deg, rgba(6, 12, 22, 0.14), rgba(6, 12, 22, 0.32)),
+    radial-gradient(circle at 50% 50%, rgba(84, 227, 218, 0.06), transparent 52%);
+}
+
+.canvas {
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+@keyframes loadingPulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scaleX(0.92);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+@media (max-width: 760px) {
+  .locationBadge {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    max-width: none;
+  }
+
+  .mapLoadingPanel {
+    right: 12px;
+    left: 12px;
+    top: 12px;
+    width: auto;
+  }
+}
