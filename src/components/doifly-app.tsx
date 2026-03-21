@@ -1064,6 +1064,15 @@ export function DoIflyApp() {
   const [profile, setProfile] = useState<DroneProfile>(() =>
     createProfileFromCatalog(),
   );
+  const [onboardingModelId, setOnboardingModelId] = useState<string>(
+    profile.modelId,
+  );
+  const [onboardingOperationPurpose, setOnboardingOperationPurpose] = useState<
+    string
+  >(profile.operationPurpose ?? "recreational");
+  const [onboardingAllowLocation, setOnboardingAllowLocation] = useState<boolean>(
+    true,
+  );
   const [coords, setCoords] = useState<Coordinates | null>(null);
   const [locationSource, setLocationSource] = useState<LocationSource | null>(null);
   const [selectedLocationLabel, setSelectedLocationLabel] = useState("");
@@ -1737,12 +1746,34 @@ export function DoIflyApp() {
       );
       return;
     }
-
+    // accepted path: leave room for onboarding flow (profile selection)
     setErrorMessage(
       canPersistToDevice
         ? "Profile saved on this device. Use device location or enter a custom place to load local wind, weather, and rule checks."
         : "This browser is not allowing persistent storage right now, so Do.I.Fly? will keep your profile only for this session.",
     );
+  }
+
+  function handleAcceptStorageWithOnboarding() {
+    // Apply onboarding selections into profile then accept storage
+    setProfile((current) =>
+      mergeProfileFromCatalog(
+        { ...current, operationPurpose: onboardingOperationPurpose as any },
+        onboardingModelId,
+      ),
+    );
+
+    setConsent((current) => ({ ...current, storageConsent: "accepted" }));
+
+    // If user opted into location services, trigger a location request to prompt the browser
+    if (onboardingAllowLocation) {
+      // requestLocation will set consent.locationPermission appropriately
+      try {
+        requestLocation();
+      } catch {
+        // ignore
+      }
+    }
   }
 
   async function handleClearStoredData() {
@@ -2483,21 +2514,73 @@ export function DoIflyApp() {
               After this, Do.I.Fly? will ask how you want to pick a flight location.
               Device location is only requested after you tap the button.
             </p>
-            <div className={styles.modalActions}>
-              <button
-                className={styles.primaryButton}
-                type="button"
-                onClick={() => handleStorageDecision("accepted")}
-              >
-                Keep it on this device
-              </button>
-              <button
-                className={styles.secondaryButton}
-                type="button"
-                onClick={() => handleStorageDecision("declined")}
-              >
-                Use session only
-              </button>
+            <div className={styles.schedulerForm}>
+              <label className={styles.field}>
+                <span>Drone model</span>
+                <select
+                  value={onboardingModelId}
+                  onChange={(e) => setOnboardingModelId(e.target.value)}
+                >
+                  {DRONE_CATALOG.map((entry) => (
+                    <option key={entry.modelId} value={entry.modelId}>
+                      {entry.manufacturer} {entry.modelName}
+                    </option>
+                  ))}
+                  <option value={CUSTOM_DRONE_MODEL_ID}>Other / custom</option>
+                </select>
+              </label>
+
+              <label className={styles.field}>
+                <span>Operation type</span>
+                <select
+                  value={onboardingOperationPurpose}
+                  onChange={(e) => setOnboardingOperationPurpose(e.target.value)}
+                >
+                  <option value="recreational">Recreational</option>
+                  <option value="business">Business / professional</option>
+                </select>
+              </label>
+
+              <label className={styles.field}>
+                <span>Allow location services</span>
+                <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+                  <button
+                    type="button"
+                    className={
+                      onboardingAllowLocation ? styles.primaryButton : styles.secondaryButton
+                    }
+                    onClick={() => setOnboardingAllowLocation(true)}
+                  >
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    className={
+                      !onboardingAllowLocation ? styles.primaryButton : styles.secondaryButton
+                    }
+                    onClick={() => setOnboardingAllowLocation(false)}
+                  >
+                    No
+                  </button>
+                </div>
+              </label>
+
+              <div className={styles.modalActions}>
+                <button
+                  className={styles.primaryButton}
+                  type="button"
+                  onClick={() => handleAcceptStorageWithOnboarding()}
+                >
+                  Keep it on this device
+                </button>
+                <button
+                  className={styles.secondaryButton}
+                  type="button"
+                  onClick={() => handleStorageDecision("declined")}
+                >
+                  Use session only
+                </button>
+              </div>
             </div>
           </section>
         </div>
@@ -3843,6 +3926,30 @@ export function DoIflyApp() {
             <span className={styles.storagePillDot} />
             {storageStatusLabel(consent.storageConsent, canPersistToDevice)}
           </button>
+          <div style={{ marginTop: 10 }}>
+            <button
+              type="button"
+              className={styles.secondaryButton}
+              onClick={() => {
+                // write current profile to storage immediately
+                if (consent.storageConsent !== "accepted") {
+                  setErrorMessage("Enable on-device storage first to update saved data.");
+                  return;
+                }
+
+                void writeStoredJson(STORAGE_KEY, profile).then((result) => {
+                  if (result === "memory") {
+                    setCanPersistToDevice(false);
+                    setErrorMessage("Profile updated in memory (persistent storage unavailable).");
+                  } else {
+                    setErrorMessage("Stored profile updated.");
+                  }
+                });
+              }}
+            >
+              Update saved data
+            </button>
+          </div>
           <p>{consentCopy(consent.storageConsent, canPersistToDevice)}</p>
         </div>
         <div className={styles.footerDisclaimerMeta}>
