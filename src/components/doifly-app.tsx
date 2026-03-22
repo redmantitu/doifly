@@ -41,6 +41,7 @@ const DRONE_CLASS_OPTIONS: DroneClassLabel[] = ["C0", "C1", "C2", "C3", "C4", "C
 const FORECAST_WINDOW_DAYS = Math.max(1, Math.round(FREE_FORECAST_HOURS / 24));
 const MAX_SCHEDULE_AHEAD_DAYS = 365;
 const LOCATION_REQUEST_TIMEOUT_MS = 26000;
+const AUTO_REFRESH_DEBOUNCE_MS = 4000;
 const SCHEDULE_REMINDER_OPTIONS = [
   { label: "No reminder", value: 0 },
   { label: "30 minutes before", value: 30 },
@@ -1047,8 +1048,8 @@ export function DoIflyApp() {
   const aircraftPickerRef = useRef<HTMLDivElement | null>(null);
   const aircraftSearchInputRef = useRef<HTMLInputElement | null>(null);
   const locationRequestTimeoutRef = useRef<number | null>(null);
+  const lastAutoRefreshAtRef = useRef(0);
   const activeLocationRequestIdRef = useRef(0);
-  const hasAutoRequestedLocationRef = useRef(false);
   const inlineManualLocationInputRef = useRef<HTMLInputElement | null>(null);
   const manualLocationInputRef = useRef<HTMLInputElement | null>(null);
   const forecastDayScrollerRef = useRef<HTMLDivElement | null>(null);
@@ -1120,6 +1121,7 @@ export function DoIflyApp() {
   const [scheduleBadgeSeenAt, setScheduleBadgeSeenAt] = useState("");
   const [scheduleNotice, setScheduleNotice] = useState("");
   const [activeReminderId, setActiveReminderId] = useState<string | null>(null);
+  const [assessmentRefreshKey, setAssessmentRefreshKey] = useState(0);
   const [scheduledReportRefreshKey, setScheduledReportRefreshKey] = useState(0);
   const [isStorageReviewOpen, setIsStorageReviewOpen] = useState(false);
   const [hasDismissedInstallGuide, setHasDismissedInstallGuide] = useState(false);
@@ -1524,6 +1526,93 @@ export function DoIflyApp() {
     };
   }, []);
 
+  const refreshAssessment = useCallback(() => {
+    setAssessmentRefreshKey((current) => current + 1);
+  }, []);
+
+  const refreshLocationAndAssessment = useCallback(() => {
+    if (!hasHydrated || consent.storageConsent === "unknown" || isRequestingLocation) {
+      return;
+    }
+
+    if (locationSource === "approximate") {
+      setErrorMessage("");
+
+      void loadApproximateLocation()
+        .then((approximateLocation) => {
+          setCoords({
+            lat: approximateLocation.latitude,
+            lng: approximateLocation.longitude,
+          });
+          setLocationSource("approximate");
+          setSelectedLocationLabel(approximateLocation.locationLabel);
+          setLocationIssue({ kind: "none", message: "" });
+        })
+        .catch(() => {
+          refreshAssessment();
+        });
+
+      return;
+    }
+
+    if (
+      locationCapability === "available" &&
+      consent.locationPermission !== "denied" &&
+      (locationSource === "device" || !coords)
+    ) {
+      requestLocation();
+      return;
+    }
+
+    if (coords) {
+      refreshAssessment();
+    }
+  }, [
+    consent.locationPermission,
+    consent.storageConsent,
+    coords,
+    hasHydrated,
+    isRequestingLocation,
+    locationCapability,
+    locationSource,
+    refreshAssessment,
+    requestLocation,
+  ]);
+
+  useEffect(() => {
+    if (!hasHydrated || consent.storageConsent === "unknown") {
+      return;
+    }
+
+    const triggerRefresh = () => {
+      const now = Date.now();
+
+      if (now - lastAutoRefreshAtRef.current < AUTO_REFRESH_DEBOUNCE_MS) {
+        return;
+      }
+
+      lastAutoRefreshAtRef.current = now;
+      refreshLocationAndAssessment();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        triggerRefresh();
+      }
+    };
+
+    triggerRefresh();
+    window.addEventListener("focus", triggerRefresh);
+    window.addEventListener("pageshow", triggerRefresh);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("focus", triggerRefresh);
+      window.removeEventListener("pageshow", triggerRefresh);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [consent.storageConsent, hasHydrated, refreshLocationAndAssessment]);
+
   useEffect(() => {
     if (!hasHydrated || consent.storageConsent === "unknown") {
       return;
@@ -1574,13 +1663,6 @@ export function DoIflyApp() {
             setLocationIssue((current) =>
               current.kind === "browser_denied" ? { kind: "none", message: "" } : current,
             );
-
-            if (!coords && !isRequestingLocation && !hasAutoRequestedLocationRef.current) {
-              hasAutoRequestedLocationRef.current = true;
-              queueMicrotask(() => {
-                requestLocation();
-              });
-            }
 
             return;
           }
@@ -1726,7 +1808,7 @@ export function DoIflyApp() {
     return () => {
       isCancelled = true;
     };
-  }, [coords, mode, profile]);
+  }, [assessmentRefreshKey, coords, mode, profile]);
 
   function handleStorageDecision(nextDecision: StorageConsentState) {
     setConsent((current) => ({
@@ -2511,8 +2593,9 @@ export function DoIflyApp() {
               drone-specific recommendation more accurate.
             </p>
             <p className={styles.mutedText}>
-              After this, Do.I.Fly? will ask how you want to pick a flight location.
-              Device location is only requested after you tap the button.
+              After this, Do.I.Fly? will refresh location and live conditions whenever
+              you reopen the app or page. If device location is unavailable, you can
+              still enter a custom place.
             </p>
             <div className={styles.schedulerForm}>
               <label className={styles.field}>
@@ -2735,9 +2818,9 @@ export function DoIflyApp() {
             <p className={styles.modalEyebrow}>Location services</p>
             <h2>Choose how Do.I.Fly? should find your flight area.</h2>
             <p>
-              Device location is only requested after you tap the button. If the browser
-              blocks it, or this page is not running on HTTPS, you can still enter a
-              place manually.
+              Do.I.Fly? refreshes location automatically whenever the page or installed
+              app is opened. If the browser blocks it, or this page is not running on
+              HTTPS, you can still enter a place manually.
             </p>
             {locationCapability !== "available" || locationIssue.kind !== "none" ? (
               <p className={styles.errorText}>{locationIssue.message}</p>
