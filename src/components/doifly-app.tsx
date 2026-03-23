@@ -12,7 +12,6 @@ import {
   type DroneProfile,
   type FlightAssessment,
   type GenericAdvisoryCard,
-  type OperationPurpose,
   type ScheduledFlightAssessment,
   type UserConsentState,
 } from "@/lib/doifly";
@@ -1037,14 +1036,6 @@ export function DoIflyApp() {
   const [profile, setProfile] = useState<DroneProfile>(() =>
     createProfileFromCatalog(),
   );
-  const [onboardingModelId, setOnboardingModelId] = useState<string>(
-    profile.modelId,
-  );
-  const [onboardingOperationPurpose, setOnboardingOperationPurpose] =
-    useState<OperationPurpose>(profile.operationPurpose ?? "recreational");
-  const [onboardingAllowLocation, setOnboardingAllowLocation] = useState<boolean>(
-    true,
-  );
   const [coords, setCoords] = useState<Coordinates | null>(null);
   const [locationSource, setLocationSource] = useState<LocationSource | null>(null);
   const [selectedLocationLabel, setSelectedLocationLabel] = useState("");
@@ -1714,12 +1705,6 @@ export function DoIflyApp() {
 
       if (authMode === "signup") {
         await signUp(username, authPassword);
-        setProfile((current) =>
-          mergeProfileFromCatalog(
-            { ...current, operationPurpose: onboardingOperationPurpose },
-            onboardingModelId,
-          ),
-        );
       } else {
         await signIn(username, authPassword);
       }
@@ -1762,13 +1747,6 @@ export function DoIflyApp() {
         }
       }
 
-      if (onboardingAllowLocation) {
-        try {
-          requestLocation();
-        } catch {
-          // ignore
-        }
-      }
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Could not sign in.");
     } finally {
@@ -1783,6 +1761,7 @@ export function DoIflyApp() {
       clearRememberedUsername();
       setAuthUser(null);
       setIsAuthModalOpen(true);
+      setAuthMode("login");
       setProfile(createProfileFromCatalog());
       setVisualMode("night");
       setCoords(null);
@@ -2451,6 +2430,7 @@ export function DoIflyApp() {
             <p>
               Your username and password are handled through Supabase Auth. Your drone
               profile, saved flights, and theme follow the same account on every device.
+              The app keeps you signed in on this device, including the installed PWA.
             </p>
             <form className={styles.schedulerForm} onSubmit={handleAuthSubmit}>
               <label className={styles.field}>
@@ -2473,58 +2453,6 @@ export function DoIflyApp() {
                   onChange={(event) => setAuthPassword(event.target.value)}
                   placeholder="At least 8 characters"
                 />
-              </label>
-
-              <label className={styles.field}>
-                <span>Drone model</span>
-                <select
-                  value={onboardingModelId}
-                  onChange={(e) => setOnboardingModelId(e.target.value)}
-                >
-                  {DRONE_CATALOG.map((entry) => (
-                    <option key={entry.modelId} value={entry.modelId}>
-                      {entry.manufacturer} {entry.modelName}
-                    </option>
-                  ))}
-                  <option value={CUSTOM_DRONE_MODEL_ID}>Other / custom</option>
-                </select>
-              </label>
-
-              <label className={styles.field}>
-                <span>Operation type</span>
-                <select
-                  value={onboardingOperationPurpose}
-                  onChange={(e) =>
-                    setOnboardingOperationPurpose(e.target.value as OperationPurpose)
-                  }
-                >
-                  <option value="recreational">Recreational</option>
-                  <option value="business">Business / professional</option>
-                </select>
-              </label>
-
-              <label className={styles.field}>
-                <span>Allow location services</span>
-                <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-                  <button
-                    type="button"
-                    className={
-                      onboardingAllowLocation ? styles.primaryButton : styles.secondaryButton
-                    }
-                    onClick={() => setOnboardingAllowLocation(true)}
-                  >
-                    Yes
-                  </button>
-                  <button
-                    type="button"
-                    className={
-                      !onboardingAllowLocation ? styles.primaryButton : styles.secondaryButton
-                    }
-                    onClick={() => setOnboardingAllowLocation(false)}
-                  >
-                    No
-                  </button>
-                </div>
               </label>
 
               {authError ? <p className={styles.errorText}>{authError}</p> : null}
