@@ -27,7 +27,11 @@
   --status-no-fly: rgba(255, 109, 82, 0.18);
   --status-limited: rgba(118, 157, 205, 0.18);
   position: relative;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   min-height: 100vh;
+  min-height: 100dvh;
   padding:
     max(20px, env(safe-area-inset-top))
     clamp(16px, 3vw, 44px)
@@ -112,9 +116,9 @@
 
 .brandTopRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 560px);
   gap: 22px;
-  align-items: flex-start;
+  align-items: start;
 }
 
 .brandHeading {
@@ -124,7 +128,7 @@
 .brandSignature {
   display: flex;
   gap: 14px;
-  align-items: center;
+  align-items: flex-start;
 }
 
 .brandIcon {
@@ -150,7 +154,7 @@
 .brandBlock h1 {
   max-width: none;
   font-size: clamp(2rem, 4vw, 2.8rem);
-  line-height: 0.92;
+  line-height: 0.95;
   letter-spacing: -0.04em;
   display: flex;
   gap: 0.16em;
@@ -179,10 +183,10 @@
 .brandPronunciation {
   margin-top: 8px;
   color: var(--soft-text);
-  font-size: 0.76rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: none;
 }
 
 .heroText {
@@ -211,10 +215,10 @@
 }
 
 .mastheadActions {
+  width: 100%;
   justify-content: flex-end;
-  flex: 0 0 auto;
   align-self: flex-start;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   padding: 8px;
   border: 1px solid var(--surface-border);
   border-radius: 18px;
@@ -228,6 +232,7 @@
 
 .mastheadActions > * {
   min-width: 0;
+  flex: 0 1 auto;
 }
 
 .themeToggle,
@@ -1901,6 +1906,11 @@
 }
 
 @media (max-width: 1200px) {
+  .brandTopRow {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
   .mastheadActions {
     justify-content: flex-start;
   }

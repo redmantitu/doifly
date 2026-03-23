@@ -36,6 +36,7 @@ const FORECAST_WINDOW_DAYS = Math.max(1, Math.round(FREE_FORECAST_HOURS / 24));
 const MAX_SCHEDULE_AHEAD_DAYS = 365;
 const LOCATION_REQUEST_TIMEOUT_MS = 26000;
 const AUTO_REFRESH_DEBOUNCE_MS = 4000;
+const INSTALL_GUIDE_DISMISSED_KEY = "doifly.install-guide-dismissed";
 const SCHEDULE_REMINDER_OPTIONS = [
   { label: "No reminder", value: 0 },
   { label: "30 minutes before", value: 30 },
@@ -1006,6 +1007,26 @@ function normalizeLoadedDroneProfile(value: unknown): DroneProfile {
   };
 }
 
+function loadInstallGuideDismissedFlag() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    return window.localStorage.getItem(INSTALL_GUIDE_DISMISSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function persistInstallGuideDismissedFlag() {
+  try {
+    window.localStorage.setItem(INSTALL_GUIDE_DISMISSED_KEY, "1");
+  } catch {
+    // Ignore storage failures in private browsing / restricted environments.
+  }
+}
+
 export function DoIflyApp() {
   const aircraftPickerRef = useRef<HTMLDivElement | null>(null);
   const aircraftSearchInputRef = useRef<HTMLInputElement | null>(null);
@@ -1085,7 +1106,10 @@ export function DoIflyApp() {
   const [activeReminderId, setActiveReminderId] = useState<string | null>(null);
   const [assessmentRefreshKey, setAssessmentRefreshKey] = useState(0);
   const [scheduledReportRefreshKey, setScheduledReportRefreshKey] = useState(0);
-  const [hasDismissedInstallGuide, setHasDismissedInstallGuide] = useState(false);
+  const [hasDismissedInstallGuide, setHasDismissedInstallGuide] = useState(
+    loadInstallGuideDismissedFlag,
+  );
+  const [hasResolvedStandaloneState, setHasResolvedStandaloneState] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
   const mode = coords ? "personalized" : "generic";
@@ -1096,10 +1120,12 @@ export function DoIflyApp() {
     async function hydrate() {
       try {
         const rememberedUsername = getRememberedUsername();
+        const dismissedInstallGuide = loadInstallGuideDismissedFlag();
         if (rememberedUsername.username) {
           setAuthUsername(rememberedUsername.username);
           setAuthUsernameHash(rememberedUsername.usernameHash);
         }
+        setHasDismissedInstallGuide(dismissedInstallGuide);
 
         const session = await loadSession();
 
@@ -1214,11 +1240,13 @@ export function DoIflyApp() {
       setIsStandalone(
         standaloneMediaQuery.matches || Boolean(navigatorWithStandalone.standalone),
       );
+      setHasResolvedStandaloneState(true);
     };
 
     const handleAppInstalled = () => {
       setIsStandalone(true);
       setHasDismissedInstallGuide(true);
+      persistInstallGuideDismissedFlag();
     };
 
     syncInstallState();
@@ -1782,6 +1810,7 @@ export function DoIflyApp() {
 
   function dismissInstallGuide() {
     setHasDismissedInstallGuide(true);
+    persistInstallGuideDismissedFlag();
   }
 
   function rememberLocationPromptSeen() {
@@ -1971,6 +2000,7 @@ export function DoIflyApp() {
   const shouldShowInstallGuide =
     hasHydrated &&
     isAuthReady &&
+    hasResolvedStandaloneState &&
     !isAuthModalOpen &&
     !isStandalone &&
     !hasDismissedInstallGuide &&
