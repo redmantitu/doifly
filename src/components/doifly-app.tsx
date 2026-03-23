@@ -12,29 +12,24 @@ import {
   type DroneProfile,
   type FlightAssessment,
   type GenericAdvisoryCard,
+  type OperationPurpose,
   type ScheduledFlightAssessment,
-  type StorageConsentState,
   type UserConsentState,
 } from "@/lib/doifly";
 import { WindCanvas } from "./wind-canvas";
 import {
-  hasWritableStringStorage,
-  readStoredJson,
-  readStoredString,
-  removeStoredJson,
-  removeStoredString,
-  writeStoredJson,
-  writeStoredString,
-} from "@/lib/client-storage";
+  clearRememberedUsername,
+  getRememberedUsername,
+  hashUsername,
+  loadSession,
+  rememberUsername,
+  saveProfile,
+  signIn,
+  signOut,
+  signUp,
+  type AppSessionUser,
+} from "@/lib/supabase-client";
 
-const STORAGE_KEY = "doifly.profile";
-const CONSENT_KEY = "doifly.storage-consent";
-const THEME_KEY = "doifly.visual-mode";
-const SCHEDULED_FLIGHTS_KEY = "doifly.scheduled-flights";
-const SCHEDULED_REPORTS_KEY = "doifly.scheduled-reports";
-const SCHEDULE_BADGE_SEEN_AT_KEY = "doifly.schedule-badge-seen-at";
-const LOCATION_PROMPT_KEY = "doifly.location-prompt-seen";
-const INSTALL_GUIDE_KEY = "doifly.install-guide-seen";
 const CUSTOM_DRONE_MODEL_ID = "custom-other";
 const CUSTOM_CATEGORY_OPTIONS = ["Open", "Specific", "Certified", "Other"] as const;
 const DRONE_CLASS_OPTIONS: DroneClassLabel[] = ["C0", "C1", "C2", "C3", "C4", "C5", "C6"];
@@ -150,29 +145,6 @@ interface ScheduledFlightReportState {
   state: "idle" | "loading" | "ready" | "pending" | "error";
   report?: ScheduledFlightAssessment;
   error?: string;
-}
-
-interface StorageReviewSnapshot {
-  persistenceLabel: string;
-  persistenceSummary: string;
-  browserSettings: Array<{
-    label: string;
-    value: string;
-  }>;
-  storedProfile: {
-    label: string;
-    detail: string;
-    status: string;
-  };
-  storedFlights: {
-    count: number;
-    preview: string[];
-    status: string;
-  };
-  storedReports: {
-    count: number;
-    status: string;
-  };
 }
 
 interface LocationSearchResult {
@@ -398,40 +370,6 @@ function BrandIcon() {
       />
     </svg>
   );
-}
-
-function consentCopy(
-  state: StorageConsentState,
-  canPersistToDevice: boolean,
-) {
-  if (state === "accepted" && canPersistToDevice) {
-    return "Your drone profile stays on this device and is only used to personalize Do.I.Fly?.";
-  }
-
-  if (state === "accepted") {
-    return "This browser is not allowing persistent storage right now, so Do.I.Fly? is keeping your profile only for this session.";
-  }
-
-  if (state === "declined") {
-    return "You chose session-only mode, so Do.I.Fly? keeps your drone profile only until this tab is closed.";
-  }
-
-  return "Do.I.Fly? keeps your drone profile on-device only, and only to make the recommendation more accurate.";
-}
-
-function storageStatusLabel(
-  state: StorageConsentState,
-  canPersistToDevice: boolean,
-) {
-  if (state === "accepted" && canPersistToDevice) {
-    return "On-device";
-  }
-
-  if (state === "declined" || state === "accepted") {
-    return "Session only";
-  }
-
-  return "Consent needed";
 }
 
 function heroSupportCopy(
@@ -1044,6 +982,31 @@ function getLatestScheduledReportUpdateAt(
   return latestTime > 0 ? new Date(latestTime).toISOString() : "";
 }
 
+function normalizeLoadedDroneProfile(value: unknown): DroneProfile {
+  if (!value || typeof value !== "object") {
+    return createProfileFromCatalog();
+  }
+
+  const candidate = value as Partial<DroneProfile>;
+  const baseProfile = createProfileFromCatalog(
+    typeof candidate.modelId === "string" && candidate.modelId
+      ? candidate.modelId
+      : DRONE_CATALOG[0].modelId,
+  );
+
+  return {
+    ...baseProfile,
+    ...candidate,
+    operationPurpose:
+      candidate.operationPurpose === "business" ? "business" : "recreational",
+    licenses: Array.isArray(candidate.licenses)
+      ? candidate.licenses.filter((item): item is string => typeof item === "string")
+      : [],
+    operatorCountry:
+      typeof candidate.operatorCountry === "string" ? candidate.operatorCountry : "",
+  };
+}
+
 export function DoIflyApp() {
   const aircraftPickerRef = useRef<HTMLDivElement | null>(null);
   const aircraftSearchInputRef = useRef<HTMLInputElement | null>(null);
@@ -1056,11 +1019,20 @@ export function DoIflyApp() {
   const forecastDaySectionRefs = useRef<Record<string, HTMLElement | null>>({});
   const scheduledReportsRef = useRef<Record<string, ScheduledFlightReportState>>({});
   const [hasHydrated, setHasHydrated] = useState(false);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [authUser, setAuthUser] = useState<AppSessionUser | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(true);
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [authUsername, setAuthUsername] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authUsernameHash, setAuthUsernameHash] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [visualMode, setVisualMode] = useState<VisualMode>("night");
-  const [canPersistToDevice, setCanPersistToDevice] = useState(true);
   const [consent, setConsent] = useState<UserConsentState>({
     locationPermission: "unknown",
-    storageConsent: "unknown",
+    storageConsent: "accepted",
   });
   const [profile, setProfile] = useState<DroneProfile>(() =>
     createProfileFromCatalog(),
@@ -1068,9 +1040,8 @@ export function DoIflyApp() {
   const [onboardingModelId, setOnboardingModelId] = useState<string>(
     profile.modelId,
   );
-  const [onboardingOperationPurpose, setOnboardingOperationPurpose] = useState<
-    string
-  >(profile.operationPurpose ?? "recreational");
+  const [onboardingOperationPurpose, setOnboardingOperationPurpose] =
+    useState<OperationPurpose>(profile.operationPurpose ?? "recreational");
   const [onboardingAllowLocation, setOnboardingAllowLocation] = useState<boolean>(
     true,
   );
@@ -1123,7 +1094,6 @@ export function DoIflyApp() {
   const [activeReminderId, setActiveReminderId] = useState<string | null>(null);
   const [assessmentRefreshKey, setAssessmentRefreshKey] = useState(0);
   const [scheduledReportRefreshKey, setScheduledReportRefreshKey] = useState(0);
-  const [isStorageReviewOpen, setIsStorageReviewOpen] = useState(false);
   const [hasDismissedInstallGuide, setHasDismissedInstallGuide] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -1134,86 +1104,72 @@ export function DoIflyApp() {
 
     async function hydrate() {
       try {
-        const storageAvailable = hasWritableStringStorage();
-        const savedConsent = readStoredString(CONSENT_KEY);
-        const savedTheme = readStoredString(THEME_KEY);
-        const savedLocationPromptSeen = readStoredString(LOCATION_PROMPT_KEY);
-        const savedInstallGuideSeen = readStoredString(INSTALL_GUIDE_KEY);
-        const savedProfile =
-          savedConsent === "accepted"
-            ? await readStoredJson<DroneProfile>(STORAGE_KEY)
-            : null;
-        const savedScheduledFlights =
-          savedConsent === "accepted"
-            ? await readStoredJson<ScheduledFlightPlan[]>(SCHEDULED_FLIGHTS_KEY)
-            : null;
-        const savedScheduledReports =
-          savedConsent === "accepted"
-            ? await readStoredJson<Record<string, ScheduledFlightReportState>>(
-                SCHEDULED_REPORTS_KEY,
-              )
-            : null;
-        const savedScheduleBadgeSeenAt = readStoredString(SCHEDULE_BADGE_SEEN_AT_KEY);
+        const rememberedUsername = getRememberedUsername();
+        if (rememberedUsername.username) {
+          setAuthUsername(rememberedUsername.username);
+          setAuthUsernameHash(rememberedUsername.usernameHash);
+        }
+
+        const session = await loadSession();
 
         if (isCancelled) {
           return;
         }
 
-        setCanPersistToDevice(storageAvailable);
         setLocationCapability(getLocationCapability());
         setBrowserProfile(detectBrowserProfile());
-        setHasDismissedInstallGuide(savedInstallGuideSeen === "seen");
-
-        if (savedConsent === "accepted") {
-          setConsent({
-            storageConsent: "accepted",
-            locationPermission: "unknown",
-          });
-        }
-
-        if (savedProfile) {
-          setProfile(savedProfile);
-        }
-
-        if (savedTheme === "night" || savedTheme === "day") {
-          setVisualMode(savedTheme);
-        }
-
-        if (Array.isArray(savedScheduledFlights) && savedScheduledFlights.length) {
-          setScheduledFlights(
-            savedScheduledFlights.filter(
-              (flight) =>
-                flight &&
-                typeof flight.id === "string" &&
-                typeof flight.scheduledAt === "string" &&
-                Date.parse(flight.scheduledAt) > Date.now() - 60 * 60 * 1000,
-            ),
-          );
-        }
-
-        if (savedScheduledReports) {
-          setScheduledReports(normalizeStoredScheduledReports(savedScheduledReports));
-        }
-
-        if (savedScheduleBadgeSeenAt) {
-          setScheduleBadgeSeenAt(savedScheduleBadgeSeenAt);
-        }
-
         setSiteOrigin(window.location.origin);
-        setHasDismissedLocationPrompt(savedLocationPromptSeen === "seen");
+        setHasHydrated(true);
+        setIsAuthReady(true);
+
+        if (!session.authenticated || !session.user) {
+          setIsAuthModalOpen(true);
+          return;
+        }
+
+        setAuthUser(session.user);
+        const resolvedUsernameHash = await hashUsername(session.user.username);
+        setAuthUsernameHash(resolvedUsernameHash);
+        setAuthUsername(session.user.username);
+        rememberUsername(session.user.username, resolvedUsernameHash);
+        setIsAuthModalOpen(false);
+
+        if (session.profile) {
+          setProfile(normalizeLoadedDroneProfile(session.profile.droneProfile));
+
+          if (session.profile.visualMode === "day" || session.profile.visualMode === "night") {
+            setVisualMode(session.profile.visualMode);
+          }
+
+          if (Array.isArray(session.profile.scheduledFlights)) {
+            setScheduledFlights(
+              (session.profile.scheduledFlights as ScheduledFlightPlan[]).filter(
+                (flight) =>
+                  flight &&
+                  typeof flight.id === "string" &&
+                  typeof flight.scheduledAt === "string" &&
+                  Date.parse(flight.scheduledAt) > Date.now() - 60 * 60 * 1000,
+              ),
+            );
+          }
+
+          if (session.profile.scheduledReports) {
+            setScheduledReports(
+              normalizeStoredScheduledReports(session.profile.scheduledReports),
+            );
+          }
+        }
       } catch {
         if (isCancelled) {
           return;
         }
 
-        setCanPersistToDevice(false);
         setLocationCapability(getLocationCapability());
         setBrowserProfile(detectBrowserProfile());
         setSiteOrigin(window.location.origin);
-      } finally {
-        if (!isCancelled) {
-          setHasHydrated(true);
-        }
+        setIsAuthModalOpen(true);
+        setHasHydrated(true);
+        setIsAuthReady(true);
       }
     }
 
@@ -1225,104 +1181,34 @@ export function DoIflyApp() {
   }, []);
 
   useEffect(() => {
-    if (!hasHydrated || consent.storageConsent !== "accepted") {
-      return;
-    }
-
-    if (writeStoredString(CONSENT_KEY, "accepted") === "memory") {
-      setCanPersistToDevice(false);
-    }
-    void writeStoredJson(STORAGE_KEY, profile).then((result) => {
-      if (result === "memory") {
-        setCanPersistToDevice(false);
-      }
-    });
-  }, [consent.storageConsent, hasHydrated, profile]);
-
-  useEffect(() => {
     scheduledReportsRef.current = scheduledReports;
   }, [scheduledReports]);
 
   useEffect(() => {
-    if (!hasHydrated) {
+    if (!hasHydrated || !authUser || !authUsernameHash) {
       return;
     }
 
-    if (consent.storageConsent === "accepted") {
-      void writeStoredJson(SCHEDULED_FLIGHTS_KEY, scheduledFlights).then((result) => {
-        if (result === "memory") {
-          setCanPersistToDevice(false);
-        }
+    const timeout = window.setTimeout(() => {
+      void saveProfile({
+        id: authUser.id,
+        username: authUser.username,
+        usernameHash: authUsernameHash,
+        visualMode,
+        droneProfile: profile,
+        scheduledFlights,
+        scheduledReports: getPersistableScheduledReports(scheduledReports),
+      }).catch((error: unknown) => {
+        setErrorMessage(
+          error instanceof Error ? error.message : "Could not sync the profile.",
+        );
       });
-      return;
-    }
+    }, 250);
 
-    if (consent.storageConsent === "declined") {
-      void removeStoredJson(SCHEDULED_FLIGHTS_KEY);
-    }
-  }, [consent.storageConsent, hasHydrated, scheduledFlights]);
-
-  useEffect(() => {
-    if (!hasHydrated) {
-      return;
-    }
-
-    if (consent.storageConsent === "accepted") {
-      void writeStoredJson(
-        SCHEDULED_REPORTS_KEY,
-        getPersistableScheduledReports(scheduledReports),
-      ).then((result) => {
-        if (result === "memory") {
-          setCanPersistToDevice(false);
-        }
-      });
-      return;
-    }
-
-    if (consent.storageConsent === "declined") {
-      void removeStoredJson(SCHEDULED_REPORTS_KEY);
-    }
-  }, [consent.storageConsent, hasHydrated, scheduledReports]);
-
-  useEffect(() => {
-    if (!hasHydrated) {
-      return;
-    }
-
-    if (!scheduleBadgeSeenAt) {
-      removeStoredString(SCHEDULE_BADGE_SEEN_AT_KEY);
-      return;
-    }
-
-    if (writeStoredString(SCHEDULE_BADGE_SEEN_AT_KEY, scheduleBadgeSeenAt) === "memory") {
-      setCanPersistToDevice(false);
-    }
-  }, [hasHydrated, scheduleBadgeSeenAt]);
-
-  useEffect(() => {
-    if (!hasHydrated) {
-      return;
-    }
-
-    if (writeStoredString(THEME_KEY, visualMode) === "memory") {
-      setCanPersistToDevice(false);
-    }
-  }, [hasHydrated, visualMode]);
-
-  useEffect(() => {
-    if (!hasHydrated) {
-      return;
-    }
-
-    if (!hasDismissedInstallGuide) {
-      removeStoredString(INSTALL_GUIDE_KEY);
-      return;
-    }
-
-    if (writeStoredString(INSTALL_GUIDE_KEY, "seen") === "memory") {
-      setCanPersistToDevice(false);
-    }
-  }, [hasDismissedInstallGuide, hasHydrated]);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [authUser, authUsernameHash, hasHydrated, profile, scheduledFlights, scheduledReports, visualMode]);
 
   useEffect(() => {
     if (!hasHydrated) {
@@ -1810,81 +1696,109 @@ export function DoIflyApp() {
     };
   }, [assessmentRefreshKey, coords, mode, profile]);
 
-  function handleStorageDecision(nextDecision: StorageConsentState) {
-    setConsent((current) => ({
-      ...current,
-      storageConsent: nextDecision,
-    }));
+  async function handleAuthSubmit(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
 
-    if (nextDecision === "declined") {
-      removeStoredString(CONSENT_KEY);
-      removeStoredString(LOCATION_PROMPT_KEY);
-      void removeStoredJson(STORAGE_KEY);
-      void removeStoredJson(SCHEDULED_FLIGHTS_KEY);
-      void removeStoredJson(SCHEDULED_REPORTS_KEY);
-      setIsRequestingLocation(false);
-      setErrorMessage(
-        "Session-only mode is active. You can still use device location or a custom place in this session.",
-      );
+    const username = authUsername.trim();
+
+    if (!username || authPassword.length < 8) {
+      setAuthError("Enter a username and a password with at least 8 characters.");
       return;
     }
-    // accepted path: leave room for onboarding flow (profile selection)
-    setErrorMessage(
-      canPersistToDevice
-        ? "Profile saved on this device. Use device location or enter a custom place to load local wind, weather, and rule checks."
-        : "This browser is not allowing persistent storage right now, so Do.I.Fly? will keep your profile only for this session.",
-    );
-  }
 
-  function handleAcceptStorageWithOnboarding() {
-    // Apply onboarding selections into profile then accept storage
-    setProfile((current) =>
-      mergeProfileFromCatalog(
-        { ...current, operationPurpose: onboardingOperationPurpose as any },
-        onboardingModelId,
-      ),
-    );
+    setIsAuthSubmitting(true);
+    setAuthError("");
 
-    setConsent((current) => ({ ...current, storageConsent: "accepted" }));
+    try {
+      const usernameHash = await hashUsername(username);
 
-    // If user opted into location services, trigger a location request to prompt the browser
-    if (onboardingAllowLocation) {
-      // requestLocation will set consent.locationPermission appropriately
-      try {
-        requestLocation();
-      } catch {
-        // ignore
+      if (authMode === "signup") {
+        await signUp(username, authPassword);
+        setProfile((current) =>
+          mergeProfileFromCatalog(
+            { ...current, operationPurpose: onboardingOperationPurpose },
+            onboardingModelId,
+          ),
+        );
+      } else {
+        await signIn(username, authPassword);
       }
+
+      rememberUsername(username, usernameHash);
+      setAuthUsernameHash(usernameHash);
+
+      const session = await loadSession();
+
+      if (!session.authenticated || !session.user) {
+        throw new Error("Could not load the signed-in session.");
+      }
+
+      setAuthUser(session.user);
+      setIsAuthModalOpen(false);
+
+      if (session.profile) {
+        setProfile(normalizeLoadedDroneProfile(session.profile.droneProfile));
+
+        if (session.profile.visualMode === "day" || session.profile.visualMode === "night") {
+          setVisualMode(session.profile.visualMode);
+        }
+
+        if (Array.isArray(session.profile.scheduledFlights)) {
+          setScheduledFlights(
+            (session.profile.scheduledFlights as ScheduledFlightPlan[]).filter(
+              (flight) =>
+                flight &&
+                typeof flight.id === "string" &&
+                typeof flight.scheduledAt === "string" &&
+                Date.parse(flight.scheduledAt) > Date.now() - 60 * 60 * 1000,
+            ),
+          );
+        }
+
+        if (session.profile.scheduledReports) {
+          setScheduledReports(
+            normalizeStoredScheduledReports(session.profile.scheduledReports),
+          );
+        }
+      }
+
+      if (onboardingAllowLocation) {
+        try {
+          requestLocation();
+        } catch {
+          // ignore
+        }
+      }
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Could not sign in.");
+    } finally {
+      setIsAuthSubmitting(false);
     }
   }
 
-  async function handleClearStoredData() {
-    removeStoredString(CONSENT_KEY);
-    removeStoredString(THEME_KEY);
-    removeStoredString(LOCATION_PROMPT_KEY);
-    removeStoredString(INSTALL_GUIDE_KEY);
-    removeStoredString(SCHEDULE_BADGE_SEEN_AT_KEY);
-    await removeStoredJson(STORAGE_KEY);
-    await removeStoredJson(SCHEDULED_FLIGHTS_KEY);
-    await removeStoredJson(SCHEDULED_REPORTS_KEY);
-
-    setConsent((current) => ({
-      ...current,
-      storageConsent: "unknown",
-    }));
-    setProfile(createProfileFromCatalog());
-    setVisualMode("night");
-    setHasDismissedLocationPrompt(false);
-    setHasDismissedInstallGuide(false);
-    setScheduledFlights([]);
-    setScheduledReports({});
-    setScheduleBadgeSeenAt("");
-    setScheduleNotice("");
-    setActiveReminderId(null);
-    setIsStorageReviewOpen(false);
-    setErrorMessage(
-      "Stored device data cleared. Choose again if you want Do.I.Fly? to keep anything on this device.",
-    );
+  async function handleSignOut() {
+    try {
+      await signOut();
+    } finally {
+      clearRememberedUsername();
+      setAuthUser(null);
+      setIsAuthModalOpen(true);
+      setProfile(createProfileFromCatalog());
+      setVisualMode("night");
+      setCoords(null);
+      setLocationSource(null);
+      setSelectedLocationLabel("");
+      setScheduledFlights([]);
+      setScheduledReports({});
+      setScheduleBadgeSeenAt("");
+      setScheduleNotice("");
+      setActiveReminderId(null);
+      setAuthUsername("");
+      setAuthPassword("");
+      setAuthError("");
+      setAuthUsernameHash("");
+      setErrorMessage("Signed out.");
+    }
   }
 
   function dismissInstallGuide() {
@@ -1893,12 +1807,6 @@ export function DoIflyApp() {
 
   function rememberLocationPromptSeen() {
     setHasDismissedLocationPrompt(true);
-
-    if (consent.storageConsent === "accepted" && canPersistToDevice) {
-      if (writeStoredString(LOCATION_PROMPT_KEY, "seen") === "memory") {
-        setCanPersistToDevice(false);
-      }
-    }
   }
 
   function openManualLocationModal() {
@@ -2075,98 +1983,50 @@ export function DoIflyApp() {
   const installGuide = getInstallGuide(browserProfile);
   const shouldShowLocationPrompt =
     hasHydrated &&
-    consent.storageConsent !== "unknown" &&
+    isAuthReady &&
+    !isAuthModalOpen &&
     !coords &&
     !hasDismissedLocationPrompt &&
     !isManualLocationOpen &&
     !isSchedulerOpen;
   const shouldShowInstallGuide =
     hasHydrated &&
-    consent.storageConsent !== "unknown" &&
+    isAuthReady &&
+    !isAuthModalOpen &&
     !isStandalone &&
     !hasDismissedInstallGuide &&
     !shouldShowLocationPrompt &&
     !isManualLocationOpen &&
-    !isStorageReviewOpen;
+    !isProfileOpen;
   const isAnyModalOpen =
     hasHydrated &&
-    (consent.storageConsent === "unknown" ||
-      isStorageReviewOpen ||
+    (isAuthModalOpen ||
+      isProfileOpen ||
       shouldShowInstallGuide ||
       shouldShowLocationPrompt ||
       isManualLocationOpen ||
       isSchedulerOpen);
-  const persistedScheduledReports = useMemo(
-    () => getPersistableScheduledReports(scheduledReports),
-    [scheduledReports],
-  );
-  const storageReviewSnapshot = useMemo<StorageReviewSnapshot>(() => {
-    const persistentProfileEnabled =
-      consent.storageConsent === "accepted" && canPersistToDevice;
-
+  const profileReviewSnapshot = useMemo(() => {
     return {
-      persistenceLabel: storageStatusLabel(consent.storageConsent, canPersistToDevice),
-      persistenceSummary:
-        consent.storageConsent === "accepted" && canPersistToDevice
-          ? "Profile data and saved flight planning data are stored in this browser. Structured records are written to IndexedDB and encrypted when the browser allows it."
-          : consent.storageConsent === "accepted"
-            ? "You allowed storage, but this browser is currently falling back to session memory instead of persistent device storage."
-            : consent.storageConsent === "declined"
-              ? "Persistent aircraft and schedule storage is off. Only lightweight browser preferences may still remain on this device."
-              : "Persistent storage has not been approved yet, so the app is waiting before saving aircraft and flight planning data.",
-      browserSettings: [
-        {
-          label: "Storage preference",
-          value:
-            consent.storageConsent === "accepted"
-              ? "Accepted"
-              : consent.storageConsent === "declined"
-                ? "Session only"
-                : "Not chosen yet",
-        },
-        {
-          label: "Theme preference",
-          value: visualMode === "night" ? "Night mode" : "Day mode",
-        },
-        {
-          label: "Location prompt",
-          value: hasDismissedLocationPrompt ? "Dismissed once" : "Not dismissed",
-        },
-        {
-          label: "Schedule badge marker",
-          value: scheduleBadgeSeenAt
-            ? new Date(scheduleBadgeSeenAt).toLocaleString()
-            : "Nothing stored",
-        },
-      ],
-      storedProfile: {
-        label: profileDisplayName,
-        detail: `${profile.weightGrams} g · ${profile.operationPurpose} · ${profile.classLabel}`,
-        status: persistentProfileEnabled ? "Stored on device" : "Session only",
-      },
-      storedFlights: {
-        count: scheduledFlights.length,
-        preview: scheduledFlights
-          .slice(0, 3)
-          .map((flight) => `${flight.title} · ${formatScheduledDateTime(flight.scheduledAt)}`),
-        status: persistentProfileEnabled ? "Stored on device" : "Session only",
-      },
-      storedReports: {
-        count: Object.keys(persistedScheduledReports).length,
-        status: persistentProfileEnabled ? "Stored on device" : "Session only",
-      },
+      username: authUser?.username ?? "Not signed in",
+      profileLabel: profileDisplayName,
+      profileDetail: `${profile.weightGrams} g · ${profile.operationPurpose} · ${profile.classLabel}`,
+      themeLabel: visualMode === "night" ? "Night mode" : "Day mode",
+      droneCount: scheduledFlights.length,
+      reportCount: Object.keys(getPersistableScheduledReports(scheduledReports)).length,
+      locationPromptState: hasDismissedLocationPrompt ? "Dismissed once" : "Not dismissed",
+      scheduleBadgeState: scheduleBadgeSeenAt ? new Date(scheduleBadgeSeenAt).toLocaleString() : "Nothing stored",
     };
   }, [
-    canPersistToDevice,
-    consent.storageConsent,
+    authUser?.username,
     hasDismissedLocationPrompt,
-    persistedScheduledReports,
     profile.classLabel,
     profile.operationPurpose,
     profile.weightGrams,
     profileDisplayName,
     scheduleBadgeSeenAt,
-    scheduledFlights,
+    scheduledFlights.length,
+    scheduledReports,
     visualMode,
   ]);
   const focusNotes = assessment
@@ -2583,21 +2443,38 @@ export function DoIflyApp() {
 
   return (
     <div className={styles.pageShell} data-theme={visualMode}>
-      {hasHydrated && consent.storageConsent === "unknown" ? (
+      {hasHydrated && isAuthModalOpen ? (
         <div className={styles.modalBackdrop}>
           <section className={styles.modal}>
-            <p className={styles.modalEyebrow}>On-device only</p>
-            <h2>Let Do.I.Fly? remember your drone profile on this device?</h2>
+            <p className={styles.modalEyebrow}>Supabase account</p>
+            <h2>{authMode === "signup" ? "Create your Do.I.Fly? account" : "Sign in to sync your profile"}</h2>
             <p>
-              This information stays in the browser in v1. It is only used to make the
-              drone-specific recommendation more accurate.
+              Your username and password are handled through Supabase Auth. Your drone
+              profile, saved flights, and theme follow the same account on every device.
             </p>
-            <p className={styles.mutedText}>
-              After this, Do.I.Fly? will refresh location and live conditions whenever
-              you reopen the app or page. If device location is unavailable, you can
-              still enter a custom place.
-            </p>
-            <div className={styles.schedulerForm}>
+            <form className={styles.schedulerForm} onSubmit={handleAuthSubmit}>
+              <label className={styles.field}>
+                <span>Username</span>
+                <input
+                  type="text"
+                  autoComplete="username"
+                  value={authUsername}
+                  onChange={(event) => setAuthUsername(event.target.value)}
+                  placeholder="Example: skypilot"
+                />
+              </label>
+
+              <label className={styles.field}>
+                <span>Password</span>
+                <input
+                  type="password"
+                  autoComplete={authMode === "signup" ? "new-password" : "current-password"}
+                  value={authPassword}
+                  onChange={(event) => setAuthPassword(event.target.value)}
+                  placeholder="At least 8 characters"
+                />
+              </label>
+
               <label className={styles.field}>
                 <span>Drone model</span>
                 <select
@@ -2617,7 +2494,9 @@ export function DoIflyApp() {
                 <span>Operation type</span>
                 <select
                   value={onboardingOperationPurpose}
-                  onChange={(e) => setOnboardingOperationPurpose(e.target.value)}
+                  onChange={(e) =>
+                    setOnboardingOperationPurpose(e.target.value as OperationPurpose)
+                  }
                 >
                   <option value="recreational">Recreational</option>
                   <option value="business">Business / professional</option>
@@ -2648,106 +2527,102 @@ export function DoIflyApp() {
                 </div>
               </label>
 
+              {authError ? <p className={styles.errorText}>{authError}</p> : null}
+
               <div className={styles.modalActions}>
-                <button
-                  className={styles.primaryButton}
-                  type="button"
-                  onClick={() => handleAcceptStorageWithOnboarding()}
-                >
-                  Keep it on this device
+                <button className={styles.primaryButton} type="submit" disabled={isAuthSubmitting}>
+                  {isAuthSubmitting
+                    ? "Working..."
+                    : authMode === "signup"
+                      ? "Create account"
+                      : "Sign in"}
                 </button>
                 <button
                   className={styles.secondaryButton}
                   type="button"
-                  onClick={() => handleStorageDecision("declined")}
+                  onClick={() => setAuthMode((current) => (current === "signup" ? "login" : "signup"))}
                 >
-                  Use session only
+                  {authMode === "signup" ? "Use existing account" : "Create new account"}
                 </button>
               </div>
-            </div>
+            </form>
           </section>
         </div>
       ) : null}
-      {isStorageReviewOpen ? (
+      {isProfileOpen ? (
         <div
           className={styles.modalBackdrop}
           onClick={() => {
-            setIsStorageReviewOpen(false);
+            setIsProfileOpen(false);
           }}
         >
           <section
             className={`${styles.modal} ${styles.storageReviewModal}`}
             role="dialog"
             aria-modal="true"
-            aria-labelledby="storage-review-title"
+            aria-labelledby="profile-review-title"
             onClick={(event) => {
               event.stopPropagation();
             }}
           >
             <div className={styles.modalTopBar}>
-              <p className={styles.modalEyebrow}>Stored on this device</p>
+              <p className={styles.modalEyebrow}>Supabase profile</p>
               <button
                 className={styles.modalCloseButton}
                 type="button"
                 onClick={() => {
-                  setIsStorageReviewOpen(false);
+                  setIsProfileOpen(false);
                 }}
               >
                 Close
               </button>
             </div>
-            <h2 id="storage-review-title">Review what Do.I.Fly? keeps locally</h2>
-            <p>{storageReviewSnapshot.persistenceSummary}</p>
+            <h2 id="profile-review-title">Review what Do.I.Fly? syncs across devices</h2>
+            <p>
+              Your signed-in account keeps the drone profile, scheduled flights, and
+              theme preference in Supabase. Any device using the same account will pull
+              the same saved profile.
+            </p>
 
             <div className={styles.storageReviewGrid}>
               <article className={styles.storageReviewCard}>
-                <span className={styles.storageReviewLabel}>Storage mode</span>
-                <strong>{storageReviewSnapshot.persistenceLabel}</strong>
+                <span className={styles.storageReviewLabel}>Account</span>
+                <strong>{profileReviewSnapshot.username}</strong>
                 <ul className={styles.storageReviewList}>
-                  {storageReviewSnapshot.browserSettings.map((item) => (
-                    <li key={item.label}>
-                      <span>{item.label}</span>
-                      <strong>{item.value}</strong>
-                    </li>
-                  ))}
+                  <li>
+                    <span>Theme preference</span>
+                    <strong>{profileReviewSnapshot.themeLabel}</strong>
+                  </li>
+                  <li>
+                    <span>Location prompt</span>
+                    <strong>{profileReviewSnapshot.locationPromptState}</strong>
+                  </li>
+                  <li>
+                    <span>Schedule badge</span>
+                    <strong>{profileReviewSnapshot.scheduleBadgeState}</strong>
+                  </li>
                 </ul>
               </article>
 
               <article className={styles.storageReviewCard}>
                 <span className={styles.storageReviewLabel}>Aircraft profile</span>
-                <strong>{storageReviewSnapshot.storedProfile.label}</strong>
-                <p>{storageReviewSnapshot.storedProfile.detail}</p>
-                <span className={styles.storageReviewStatus}>
-                  {storageReviewSnapshot.storedProfile.status}
-                </span>
+                <strong>{profileReviewSnapshot.profileLabel}</strong>
+                <p>{profileReviewSnapshot.profileDetail}</p>
+                <span className={styles.storageReviewStatus}>Synced with account</span>
               </article>
 
               <article className={styles.storageReviewCard}>
                 <span className={styles.storageReviewLabel}>Scheduled flights</span>
-                <strong>{storageReviewSnapshot.storedFlights.count} saved</strong>
-                {storageReviewSnapshot.storedFlights.preview.length ? (
-                  <ul className={styles.storageReviewPreview}>
-                    {storageReviewSnapshot.storedFlights.preview.map((entry) => (
-                      <li key={entry}>{entry}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p>No scheduled flights are currently saved.</p>
-                )}
-                <span className={styles.storageReviewStatus}>
-                  {storageReviewSnapshot.storedFlights.status}
-                </span>
+                <strong>{profileReviewSnapshot.droneCount} saved</strong>
+                <p>These follow the same account on every device.</p>
+                <span className={styles.storageReviewStatus}>Synced with account</span>
               </article>
 
               <article className={styles.storageReviewCard}>
-                <span className={styles.storageReviewLabel}>Cached reports</span>
-                <strong>{storageReviewSnapshot.storedReports.count} snapshots</strong>
-                <p>
-                  These are the latest saved forecast review cards for scheduled flights.
-                </p>
-                <span className={styles.storageReviewStatus}>
-                  {storageReviewSnapshot.storedReports.status}
-                </span>
+                <span className={styles.storageReviewLabel}>Flight reports</span>
+                <strong>{profileReviewSnapshot.reportCount} snapshots</strong>
+                <p>Forecast snapshots are synced with the profile too.</p>
+                <span className={styles.storageReviewStatus}>Synced with account</span>
               </article>
             </div>
 
@@ -2756,7 +2631,7 @@ export function DoIflyApp() {
                 className={styles.secondaryButton}
                 type="button"
                 onClick={() => {
-                  setIsStorageReviewOpen(false);
+                  setIsProfileOpen(false);
                 }}
               >
                 Close
@@ -2765,10 +2640,10 @@ export function DoIflyApp() {
                 className={styles.primaryButton}
                 type="button"
                 onClick={() => {
-                  void handleClearStoredData();
+                  void handleSignOut();
                 }}
               >
-                Clear stored data
+                Sign out
               </button>
             </div>
           </section>
@@ -3060,6 +2935,31 @@ export function DoIflyApp() {
                 <span className={styles.themeToggleLabel}>Theme</span>
                 <strong>{visualMode === "night" ? "Night" : "Day"}</strong>
               </button>
+
+              {authUser ? (
+                <button
+                  className={styles.secondaryButton}
+                  type="button"
+                  onClick={() => {
+                    setIsProfileOpen(true);
+                  }}
+                >
+                  <span className={styles.themeToggleLabel}>Profile</span>
+                  <strong>{authUser.username}</strong>
+                </button>
+              ) : null}
+
+              {authUser ? (
+                <button
+                  className={styles.secondaryButton}
+                  type="button"
+                  onClick={() => {
+                    void handleSignOut();
+                  }}
+                >
+                  Sign out
+                </button>
+              ) : null}
 
               {coords ? (
                 <div className={styles.locationChip} aria-label={`Using location: ${locationLabel}`}>
@@ -3353,13 +3253,11 @@ export function DoIflyApp() {
             </div>
             <span
               className={`${styles.infoPill} ${styles.storagePill} ${
-                consent.storageConsent === "accepted"
-                  ? styles.storagePillAccepted
-                  : styles.storagePillDeclined
+                authUser ? styles.storagePillAccepted : styles.storagePillDeclined
               }`}
             >
               <span className={styles.storagePillDot} />
-              {storageStatusLabel(consent.storageConsent, canPersistToDevice)}
+              {authUser ? "Synced" : "Not signed in"}
             </span>
           </div>
           <p className={styles.bodyText}>
@@ -3992,48 +3890,31 @@ export function DoIflyApp() {
 
       <footer className={styles.footerDisclaimer}>
         <div className={styles.footerDisclaimerMain}>
-          <button
-            type="button"
-            className={`${styles.infoPill} ${styles.storagePill} ${
-              consent.storageConsent === "accepted"
-                ? styles.storagePillAccepted
-                : consent.storageConsent === "declined"
-                  ? styles.storagePillDeclined
-                  : styles.storagePillPending
-            } ${styles.storageReviewTrigger}`}
-            aria-haspopup="dialog"
-            onClick={() => {
-              setIsStorageReviewOpen(true);
-            }}
-          >
-            <span className={styles.storagePillDot} />
-            {storageStatusLabel(consent.storageConsent, canPersistToDevice)}
-          </button>
-          <div style={{ marginTop: 10 }}>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <button
               type="button"
               className={styles.secondaryButton}
-              onClick={() => {
-                // write current profile to storage immediately
-                if (consent.storageConsent !== "accepted") {
-                  setErrorMessage("Enable on-device storage first to update saved data.");
-                  return;
-                }
-
-                void writeStoredJson(STORAGE_KEY, profile).then((result) => {
-                  if (result === "memory") {
-                    setCanPersistToDevice(false);
-                    setErrorMessage("Profile updated in memory (persistent storage unavailable).");
-                  } else {
-                    setErrorMessage("Stored profile updated.");
-                  }
-                });
-              }}
+              onClick={() => setIsProfileOpen(true)}
             >
-              Update saved data
+              Review synced profile
             </button>
+            {authUser ? (
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                onClick={() => {
+                  void handleSignOut();
+                }}
+              >
+                Sign out
+              </button>
+            ) : null}
           </div>
-          <p>{consentCopy(consent.storageConsent, canPersistToDevice)}</p>
+          <p>
+            {authUser
+              ? `Signed in as ${authUser.username}. Any changes to the drone profile, scheduled flights, drone certification, and theme preference sync through your Supabase profile.`
+              : "Sign in to sync your drone profile, scheduled flights, certification, and theme preference across devices."}
+          </p>
         </div>
         <div className={styles.footerDisclaimerMeta}>
           <p>
