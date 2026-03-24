@@ -26,6 +26,7 @@
   --status-caution: rgba(255, 188, 92, 0.18);
   --status-no-fly: rgba(255, 109, 82, 0.18);
   --status-limited: rgba(118, 157, 205, 0.18);
+  --content-max-width: 1380px;
   position: relative;
   width: 100%;
   max-width: 100%;
@@ -89,9 +90,14 @@
 
 .masthead,
 .focusGrid,
-.grid {
+.grid,
+.reminderBanner,
+.legendPanel,
+.footerDisclaimer {
   position: relative;
   z-index: 1;
+  width: min(100%, var(--content-max-width));
+  margin-inline: auto;
 }
 
 .masthead {
@@ -731,7 +737,11 @@
 }
 
 .localCheckCardWithGeneric {
-  grid-column: span 8;
+  grid-column: 1 / -1;
+}
+
+.genericCard {
+  grid-column: 1 / -1;
 }
 
 .localCheckCardStandalone {
@@ -1565,6 +1575,101 @@
   flex-wrap: wrap;
 }
 
+.supportPanel {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid var(--surface-border);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0));
+}
+
+.supportPanelText {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.supportPanelText p {
+  margin: 0;
+  color: var(--soft-text);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.supportEyebrow {
+  color: var(--brand-accent);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.supportPanelAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.supportPanelActions {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.supportActionCard {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  padding: 10px;
+  border: 1px solid var(--surface-border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.supportActionTitle {
+  margin: 0;
+  color: var(--page-text);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.supportQrImage {
+  width: 112px;
+  height: 112px;
+  border-radius: 10px;
+  display: block;
+}
+
+.supportQrLink {
+  display: inline-flex;
+  border-radius: 10px;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.supportQrLink:hover,
+.supportQrLink:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 2px var(--surface-border-strong);
+}
+
+.supportActionHint {
+  margin: 0;
+  color: var(--soft-text);
+  font-size: 0.68rem;
+  text-align: center;
+  max-width: 22ch;
+}
+
 .storageReviewModal {
   width: min(760px, 100%);
 }
@@ -2117,6 +2222,20 @@
   .footerDisclaimerMeta {
     display: grid;
     gap: 10px;
+  }
+
+  .supportPanel {
+    align-items: flex-start;
+  }
+
+  .supportPanelActions,
+  .supportPanelAction {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .supportPanelActions {
+    align-items: flex-start;
   }
 
   .inlineManualLocationRow {

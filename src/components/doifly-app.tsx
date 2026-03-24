@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import Image from "next/image";
 import styles from "./doifly-app.module.css";
 import { DRONE_CATALOG, type DroneClassLabel } from "@/lib/drone-catalog";
 import {
@@ -3874,6 +3875,32 @@ export function DoIflyApp() {
               : "Sign in to sync your drone profile, scheduled flights, certification, and theme preference across devices."}
           </p>
         </div>
+        <section className={styles.supportPanel} aria-label="Support Do.I.Fly?">
+          <div className={styles.supportPanelText}>
+            <p className={styles.supportEyebrow}>Support Do.I.Fly?</p>
+            <p>If this app helps with your pre-flight checks, you can support ongoing updates.</p>
+          </div>
+          <div className={styles.supportPanelActions}>
+            <section className={styles.supportActionCard} aria-label="Support actions">
+              <p className={styles.supportActionTitle}>Click or Scan the QR code to support ongoing updates.</p>
+              <a
+                className={styles.supportQrLink}
+                href="https://buymeacoffee.com/crosu.store"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Open Buy Me a Coffee support page"
+              >
+                <Image
+                  src="/qr-code.png"
+                  alt="Buy Me a Coffee QR code"
+                  className={styles.supportQrImage}
+                  width={112}
+                  height={112}
+                />
+              </a>
+            </section>
+          </div>
+        </section>
         <div className={styles.footerDisclaimerMeta}>
           <p>
             The live wind view covers current conditions plus the next {FORECAST_WINDOW_DAYS} days.
